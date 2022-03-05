@@ -2,7 +2,6 @@ package itemsfetcher
 
 import (
 	"errors"
-	"math/rand"
 	"sync"
 	"time"
 
@@ -251,12 +250,15 @@ func (f *Fetcher) loop() {
 					f.forgetHash(id)
 				} else if time.Since(f.fetching[id].fetchingTime) > f.cfg.ArriveTimeout-f.cfg.GatherSlack {
 					// The item still didn't arrive, queue for fetching from a random peer
-					announce := announces[rand.Intn(len(announces))]
-					request[announce.peer] = append(request[announce.peer], id)
-					requestFns[announce.peer] = announce.fetchItems
-					f.fetching[id] = fetchingItem{
-						announce:     announce,
-						fetchingTime: now,
+					for j := range announces {
+						//announce := announces[rand.Intn(len(announces))]
+						announce := announces[j]
+						request[announce.peer] = append(request[announce.peer], id)
+						requestFns[announce.peer] = announce.fetchItems
+						f.fetching[id] = fetchingItem{
+							announce:     announce,
+							fetchingTime: now,
+						}
 					}
 				}
 			}
