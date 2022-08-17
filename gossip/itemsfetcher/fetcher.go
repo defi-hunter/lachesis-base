@@ -36,6 +36,7 @@ type announcesBatch struct {
 type fetchingItem struct {
 	announce     announceData
 	fetchingTime time.Time
+	fetchCounter int
 }
 
 // Fetcher is responsible for accumulating item announcements from various peers
@@ -161,7 +162,7 @@ func (f *Fetcher) getAnnounces(id interface{}) []announceData {
 }
 
 func (f *Fetcher) processNotification(notification announcesBatch, fetchTimer *time.Timer) {
-	first := len(f.fetching) == 0
+	//first := len(f.fetching) == 0
 
 	// filter only not known
 	notification.ids = f.callback.OnlyInterested(notification.ids)
@@ -185,6 +186,7 @@ func (f *Fetcher) processNotification(notification announcesBatch, fetchTimer *t
 				f.fetching[id] = fetchingItem{
 					announce:     notification.announceData,
 					fetchingTime: now,
+					fetchCounter: 0,
 				}
 				toFetch = append(toFetch, id)
 			}
@@ -199,8 +201,8 @@ func (f *Fetcher) processNotification(notification announcesBatch, fetchTimer *t
 		})
 	}
 
-	if first && len(f.fetching) != 0 {
-		f.rescheduleFetch(fetchTimer)
+	if /*first &&*/ len(f.fetching) != 0 {
+		f.rescheduleFetch(fetchTimer, 0)
 	}
 }
 
@@ -252,9 +254,15 @@ func (f *Fetcher) loop() {
 				} else if time.Since(f.fetching[id].fetchingTime) > f.cfg.ArriveTimeout-f.cfg.GatherSlack {
 					// The item still didn't arrive, queue for fetching from a random peer
 					reqLen := len(announces)
-					if reqLen > 2 {
-						reqLen = 2
+					if reqLen > 8 {
+						reqLen = 8
 					}
+
+					count := f.fetching[id].fetchCounter
+					if count > 0 && (count%100 > 0) {
+						continue
+					}
+
 					//for j := range announces {
 					for j := 0; j < reqLen; j++ {
 						//announce := announces[rand.Intn(len(announces))]
@@ -264,6 +272,7 @@ func (f *Fetcher) loop() {
 						f.fetching[id] = fetchingItem{
 							announce:     announce,
 							fetchingTime: now,
+							fetchCounter: count + 1,
 						}
 					}
 				}
@@ -291,7 +300,7 @@ func (f *Fetcher) loop() {
 				})
 			}
 			// Schedule the next fetch if items are still pending
-			f.rescheduleFetch(fetchTimer)
+			f.rescheduleFetch(fetchTimer, 2*f.cfg.ArriveTimeout)
 		}
 	}
 }
@@ -304,7 +313,7 @@ func maxDuration(a, b time.Duration) time.Duration {
 }
 
 // rescheduleFetch resets the specified fetch timer to the next announce timeout.
-func (f *Fetcher) rescheduleFetch(fetch *time.Timer) {
+func (f *Fetcher) rescheduleFetch(fetch *time.Timer, wait time.Duration) {
 	// Short circuit if no items are announced
 	if f.announces.Len() == 0 {
 		return
@@ -324,7 +333,7 @@ func (f *Fetcher) rescheduleFetch(fetch *time.Timer) {
 		i++
 	}
 	// limit minimum duration to prevent spinning too often
-	fetch.Reset(maxDuration(f.cfg.ArriveTimeout-time.Since(earliest), f.cfg.ArriveTimeout/8))
+	fetch.Reset(maxDuration(f.cfg.ArriveTimeout-time.Since(earliest), f.cfg.ArriveTimeout/8 + wait))
 }
 
 // forgetHash removes all traces of a item announcement from the fetcher's
