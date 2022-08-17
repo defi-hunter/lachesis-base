@@ -177,7 +177,8 @@ func (f *Fetcher) processNotification(notification announcesBatch, fetchTimer *t
 		// add new announcement. other peers may already have announced it, so it's an array
 		anns := f.getAnnounces(id)
 		anns = append(anns, notification.announceData)
-		f.announces.Add(id, append(anns, notification.announceData), uint(len(anns)))
+		f.announces.Add(id, anns, uint(len(anns)))
+		//f.announces.Add(id, append(anns, notification.announceData), uint(len(anns)))
 		// if it wasn't announced before, then schedule for fetching this time
 		if !noFetching {
 			if _, ok := f.fetching[id]; !ok {
