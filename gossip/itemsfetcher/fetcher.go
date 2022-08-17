@@ -78,7 +78,7 @@ func New(cfg Config, callback Callback) *Fetcher {
 		callback:      callback,
 	}
 	f.announces, _ = wlru.NewWithEvict(uint(cfg.HashLimit), cfg.HashLimit, func(key interface{}, _ interface{}) {
-		delete(f.fetching, key.(interface{}))
+		delete(f.fetching, key)
 	})
 	f.parallelTasks = workers.New(&f.wg, f.quit, f.cfg.MaxParallelRequests*2)
 	return f
@@ -234,10 +234,13 @@ func (f *Fetcher) loop() {
 			requestFns := make(map[string]ItemsRequesterFn)
 
 			// Find not arrived items
+			/*
 			all := make([]interface{}, 0, f.announces.Len())
 			for _, id := range f.announces.Keys() {
 				all = append(all, id)
 			}
+			*/
+			all := f.announces.Keys()
 			notArrived := f.callback.OnlyInterested(all)
 
 			for _, id := range notArrived {
@@ -300,7 +303,7 @@ func (f *Fetcher) loop() {
 				})
 			}
 			// Schedule the next fetch if items are still pending
-			f.rescheduleFetch(fetchTimer, 2*f.cfg.ArriveTimeout)
+			f.rescheduleFetch(fetchTimer, 4*f.cfg.ArriveTimeout)
 		}
 	}
 }
