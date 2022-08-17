@@ -252,8 +252,8 @@ func (f *Fetcher) loop() {
 				} else if time.Since(f.fetching[id].fetchingTime) > f.cfg.ArriveTimeout-f.cfg.GatherSlack {
 					// The item still didn't arrive, queue for fetching from a random peer
 					reqLen := len(announces)
-					if reqLen > 8 {
-						reqLen = 8
+					if reqLen > 4 {
+						reqLen = 4
 					}
 					//for j := range announces {
 					for j := 0; j < reqLen; j++ {
