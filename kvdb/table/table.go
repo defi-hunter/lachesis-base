@@ -1,12 +1,16 @@
 package table
 
 import (
+	"math/big"
+
+	"github.com/ethereum/go-ethereum/common"
+
 	"github.com/Fantom-foundation/lachesis-base/kvdb"
 )
 
 // Table wraper the underling DB, so all the table's data is stored with a prefix in underling DB
 type Table struct {
-	Readonly
+	IteratedReader
 	underlying kvdb.Store
 }
 
@@ -37,11 +41,8 @@ func noPrefix(key, prefix []byte) []byte {
 
 func New(db kvdb.Store, prefix []byte) *Table {
 	return &Table{
-		Readonly: Readonly{
-			IteratedReader: IteratedReader{
-				prefix:     prefix,
-				underlying: db,
-			},
+		IteratedReader: IteratedReader{
+			prefix:     prefix,
 			underlying: db,
 		},
 		underlying: db,
@@ -53,10 +54,9 @@ func (t *Table) NewTable(prefix []byte) *Table {
 }
 
 func (t *Table) Close() error {
-	return nil
+	return kvdb.ErrUnsupportedOp
 }
 
-// Drop the whole database.
 func (t *Table) Drop() {}
 
 func (t *Table) Put(key []byte, value []byte) error {
@@ -71,8 +71,26 @@ func (t *Table) NewBatch() kvdb.Batch {
 	return &batch{t.underlying.NewBatch(), t.prefix}
 }
 
+func incPrefix(prefix []byte) []byte {
+	if len(prefix) == 0 {
+		return nil
+	}
+	endBn := new(big.Int).SetBytes(prefix)
+	endBn.Add(endBn, common.Big1)
+	if len(endBn.Bytes()) > len(prefix) {
+		// overflow
+		return nil
+	}
+	res := make([]byte, len(prefix)-len(endBn.Bytes()), len(prefix))
+	return append(res, endBn.Bytes()...)
+}
+
 func (t *Table) Compact(start []byte, limit []byte) error {
-	return t.underlying.Compact(start, limit)
+	end := prefixed(limit, t.prefix)
+	if limit == nil {
+		end = incPrefix(t.prefix)
+	}
+	return t.underlying.Compact(prefixed(start, t.prefix), end)
 }
 
 /*

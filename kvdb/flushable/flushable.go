@@ -36,7 +36,7 @@ type flushableReader struct {
 
 // Wrap underlying db.
 // All the writes into the cache won't be written in parent until .Flush() is called.
-func Wrap(parent kvdb.DropableStore) *Flushable {
+func Wrap(parent kvdb.Store) *Flushable {
 	if parent == nil {
 		panic("nil parent")
 	}
@@ -69,21 +69,17 @@ func WrapWithDrop(parent kvdb.Store, drop func()) *Flushable {
 func (w *Flushable) Put(key []byte, value []byte) error {
 	w.lock.Lock()
 	defer w.lock.Unlock()
-
-	return w.put(key, value)
-}
-
-func (w *Flushable) put(key []byte, value []byte) error {
 	if value == nil || key == nil {
 		return errors.New("flushable: key or value is nil")
 	}
-	if w.modified == nil {
-		return errClosed
-	}
 
+	w.put(key, value)
+	return nil
+}
+
+func (w *Flushable) put(key []byte, value []byte) {
 	w.modified.Put(string(key), common.CopyBytes(value))
 	*w.sizeEstimation += len(key) + len(value) + 128
-	return nil
 }
 
 // Has checks if key is in the exists. Looks in cache first, then - in DB.
@@ -127,13 +123,13 @@ func (w *Flushable) Delete(key []byte) error {
 	w.lock.Lock()
 	defer w.lock.Unlock()
 
-	return w.delete(key)
+	w.delete(key)
+	return nil
 }
 
-func (w *Flushable) delete(key []byte) error {
+func (w *Flushable) delete(key []byte) {
 	w.modified.Put(string(key), nil)
 	*w.sizeEstimation += len(key) + 128 // it should be (len(key) - len(old value)), but we'd need to read old value
-	return nil
 }
 
 // DropNotFlushed drops all the not flushed keys.
@@ -259,8 +255,6 @@ type flushableIterator struct {
 	treeOk   bool
 
 	start, prefix []byte
-
-	inited bool
 }
 
 // returns the smallest node which is > than specified node
@@ -293,7 +287,7 @@ func castToPair(node *rbt.Node) (key, val []byte) {
 	if node.Value == nil {
 		val = nil // deleted key
 	} else {
-		val = node.Value.([]byte) // putted value
+		val = node.Value.([]byte) // inserted value
 	}
 	return key, val
 }
@@ -301,7 +295,7 @@ func castToPair(node *rbt.Node) (key, val []byte) {
 // init should be called once under lock
 func (it *flushableIterator) init() {
 	it.parentOk = it.parentIt.Next()
-	if it.start != nil {
+	if len(it.start) != 0 {
 		it.treeNode, it.treeOk = it.tree.Ceiling(string(it.start)) // not strict >=
 	} else {
 		it.treeNode = it.tree.Left() // lowest key
@@ -432,12 +426,28 @@ func (w *Flushable) GetSnapshot() (kvdb.Snapshot, error) {
 	}, nil
 }
 
+type errIterator struct {
+	kvdb.Iterator
+	err error
+}
+
+func (it *errIterator) Error() error {
+	return it.err
+}
+
 // NewIterator creates a binary-alphabetical iterator over a subset
 // of database content with a particular key prefix, starting at a particular
 // initial key (or after, if it does not exist).
 func (w *flushableReader) NewIterator(prefix []byte, start []byte) kvdb.Iterator {
 	w.lock.RLock()
 	defer w.lock.RUnlock()
+
+	if w.modified == nil {
+		return &errIterator{
+			Iterator: devnull.NewIterator(nil, nil),
+			err:      errClosed,
+		}
+	}
 
 	it := &flushableIterator{
 		lock:     &w.lock,
@@ -488,17 +498,14 @@ func (b *cacheBatch) Delete(key []byte) error {
 func (b *cacheBatch) Write() error {
 	b.db.lock.Lock()
 	defer b.db.lock.Unlock()
+	if b.db.modified == nil {
+		return errClosed
+	}
 	for _, kv := range b.writes {
-		var err error
-
 		if kv.v == nil {
-			err = b.db.delete(kv.k)
+			b.db.delete(kv.k)
 		} else {
-			err = b.db.put(kv.k, kv.v)
-		}
-
-		if err != nil {
-			return err
+			b.db.put(kv.k, kv.v)
 		}
 	}
 	return nil

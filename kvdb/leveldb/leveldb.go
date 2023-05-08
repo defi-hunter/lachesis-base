@@ -1,9 +1,11 @@
+//go:build !js
 // +build !js
 
 // Package leveldb implements the key-value database layer based on LevelDB.
 package leveldb
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/syndtr/goleveldb/leveldb"
@@ -13,6 +15,7 @@ import (
 	"github.com/syndtr/goleveldb/leveldb/util"
 
 	"github.com/Fantom-foundation/lachesis-base/kvdb"
+	"github.com/Fantom-foundation/lachesis-base/utils/piecefunc"
 )
 
 const (
@@ -38,22 +41,100 @@ type Database struct {
 	onDrop  func()
 }
 
+// adjustCache scales down cache to match "real" RAM usage by process
+var adjustCache = piecefunc.NewFunc([]piecefunc.Dot{
+	{
+		X: 0,
+		Y: 16 * opt.KiB,
+	},
+	{
+		X: 12 * opt.MiB,
+		Y: 100 * opt.KiB,
+	},
+	{
+		X: 25 * opt.MiB,
+		Y: 1 * opt.MiB,
+	},
+	{
+		X: 47 * opt.MiB,
+		Y: 10 * opt.MiB,
+	},
+	{
+		X: 62 * opt.MiB,
+		Y: 14 * opt.MiB,
+	},
+	{
+		X: 74 * opt.MiB,
+		Y: 18 * opt.MiB,
+	},
+	{
+		X: 99 * opt.MiB,
+		Y: 25 * opt.MiB,
+	},
+	{
+		X: 153 * opt.MiB,
+		Y: 40 * opt.MiB,
+	},
+	{
+		X: 317 * opt.MiB,
+		Y: 100 * opt.MiB,
+	},
+	{
+		X: 403 * opt.MiB,
+		Y: 129 * opt.MiB,
+	},
+	{
+		X: 715 * opt.MiB,
+		Y: 216 * opt.MiB,
+	},
+	{
+		X: 889 * opt.MiB,
+		Y: 300 * opt.MiB,
+	},
+	{
+		X: 1100 * opt.MiB,
+		Y: 437 * opt.MiB,
+	},
+	{
+		X: 1530 * opt.MiB,
+		Y: 534 * opt.MiB,
+	},
+	{
+		X: 1900 * opt.MiB,
+		Y: 703 * opt.MiB,
+	},
+	{
+		X: 2800 * opt.MiB,
+		Y: 1000 * opt.MiB,
+	},
+	{
+		X: 2800000 * opt.MiB,
+		Y: 1000000 * opt.MiB,
+	},
+})
+
+func aligned256kb(v int) int {
+	base := 256 * opt.KiB
+	if v < base {
+		return v
+	}
+	return v / base * base
+}
+
 // New returns a wrapped LevelDB object. The namespace is the prefix that the
 // metrics reporting should use for surfacing internal stats.
 func New(path string, cache int, handles int, close func() error, drop func()) (*Database, error) {
 	// Ensure we have some minimal caching and file guarantees
-	if cache < minCache {
-		cache = minCache
-	}
 	if handles < minHandles {
 		handles = minHandles
 	}
+	cache = int(adjustCache(uint64(cache)))
 
 	// Open the db and recover any potential corruptions
 	db, err := leveldb.OpenFile(path, &opt.Options{
 		OpenFilesCacheCapacity: handles,
-		BlockCacheCapacity:     cache / 2,
-		WriteBuffer:            cache / 4, // Two of these are used internally
+		BlockCacheCapacity:     aligned256kb(cache / 2),
+		WriteBuffer:            aligned256kb(cache / 4), // Two of these are used internally
 		Filter:                 filter.NewBloomFilter(10),
 	})
 	if _, corrupted := err.(*errors.ErrCorrupted); corrupted {
@@ -168,7 +249,16 @@ func (db *Database) GetSnapshot() (kvdb.Snapshot, error) {
 
 // Stat returns a particular internal stat of the database.
 func (db *Database) Stat(property string) (string, error) {
-	return db.underlying.GetProperty(property)
+	if property == "disk.size" {
+		dbStats := &leveldb.DBStats{}
+		if err := db.underlying.Stats(dbStats); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d", dbStats.LevelSizes.Sum()), nil
+	}
+	prop := fmt.Sprintf("leveldb.%s", property)
+	stats, err := db.underlying.GetProperty(prop)
+	return stats, err
 }
 
 // Compact flattens the underlying data store for the given key range. In essence,

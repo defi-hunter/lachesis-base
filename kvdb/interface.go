@@ -1,9 +1,14 @@
 package kvdb
 
 import (
+	"errors"
 	"io"
 
 	"github.com/ethereum/go-ethereum/ethdb"
+)
+
+var (
+	ErrUnsupportedOp = errors.New("operation is unsupported")
 )
 
 // IdealBatchSize defines the size of the data batches should ideally add in one
@@ -77,18 +82,14 @@ type Iteratee interface {
 // Store contains all the methods required to allow handling different
 // key-value data stores backing the high level database.
 type Store interface {
-	ReadonlyStore
+	IteratedReader
+	Snapshoter
+	ethdb.Stater
 	Writer
 	Batcher
 	ethdb.Compacter
 	io.Closer
-}
-
-// ReadonlyStore contains only reading methods of Store.
-type ReadonlyStore interface {
-	IteratedReader
-	Snapshoter
-	ethdb.Stater
+	Droper
 }
 
 // Droper is able to delete the DB.
@@ -96,16 +97,10 @@ type Droper interface {
 	Drop()
 }
 
-// DropableStore is Droper + Store
-type DropableStore interface {
-	Store
-	Droper
-}
-
 // FlushableKVStore contains all the method for flushable databases,
 // i.e. databases which write changes on disk only on flush.
 type FlushableKVStore interface {
-	DropableStore
+	Store
 
 	NotFlushedPairs() int
 	NotFlushedSizeEst() int
@@ -116,17 +111,32 @@ type FlushableKVStore interface {
 // DBProducer represents real db producer.
 type DBProducer interface {
 	// OpenDB or create db with name.
-	OpenDB(name string) (DropableStore, error)
+	OpenDB(name string) (Store, error)
+}
+
+type Iterable interface {
+	// Names of existing databases.
+	Names() []string
 }
 
 type IterableDBProducer interface {
 	DBProducer
-	// Names of existing databases.
-	Names() []string
+	Iterable
 }
 
 type FlushableDBProducer interface {
 	DBProducer
 	NotFlushedSizeEst() int
 	Flush(id []byte) error
+}
+
+type ScopedFlushableProducer interface {
+	FlushableDBProducer
+	Initialize(dbNames []string, flushID []byte) ([]byte, error)
+	Close() error
+}
+
+type FullDBProducer interface {
+	ScopedFlushableProducer
+	Iterable
 }

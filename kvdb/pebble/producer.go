@@ -1,4 +1,4 @@
-package leveldb
+package pebble
 
 import (
 	"io/ioutil"
@@ -13,7 +13,7 @@ type Producer struct {
 	getCacheFdLimit func(string) (int, int)
 }
 
-// NewProducer of level db.
+// NewProducer of Pebble db.
 func NewProducer(datadir string, getCacheFdLimit func(string) (int, int)) kvdb.IterableDBProducer {
 	return &Producer{
 		datadir:         datadir,
@@ -27,7 +27,7 @@ func (p *Producer) Names() []string {
 
 	files, err := ioutil.ReadDir(p.datadir)
 	if err != nil {
-		return []string{}
+		panic(err)
 	}
 
 	for _, f := range files {
