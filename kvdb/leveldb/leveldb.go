@@ -136,6 +136,8 @@ func New(path string, cache int, handles int, close func() error, drop func()) (
 		BlockCacheCapacity:     aligned256kb(cache / 2),
 		WriteBuffer:            aligned256kb(cache / 4), // Two of these are used internally
 		Filter:                 filter.NewBloomFilter(10),
+        NoSync: 				true,
+		DisableSeeksCompaction: true,
 	})
 	if _, corrupted := err.(*errors.ErrCorrupted); corrupted {
 		db, err = leveldb.RecoverFile(path, nil)
